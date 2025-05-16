@@ -41,6 +41,22 @@
             }
         </style>
     </head>
+    <!-- Add before your closing </body> tag -->
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+
+<script>
+  // Your Firebase configuration
+  const firebaseConfig = {
+    // Paste your Firebase config here
+  };
+  
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+</script>
+<script src="chat.js"></script>
     <body>
         <div id="whisper-popup" class="whisper-popup">
             <input type="text" id="whisper-input" placeholder="Type your private message...">
