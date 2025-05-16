@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>clwswd's chatroom</title>
+        <meta name="description" content="chatroom made by chloe tate" />
+        <link rel="shortcut icon" href="https://clwwswd.neocities.org/img/point.png" type="image/x-icon" />
+        <link rel="stylesheet" href="style.css" />
+        <style>
+            .whisper-popup {
+                position: absolute;
+                background-color: white;
+                border: 1px solid #ccc;
+                padding: 10px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                z-index: 1000;
+                display: none;
+            }
+            .whisper-message {
+                background-color: #f9f2f4;
+                border: 1px solid #e0d5d8;
+                padding: 5px;
+                margin: 5px 0;
+            }
+
+            .whisper-indicator {
+                font-size: 0.8em;
+                color: #777;
+            }
+            .username-link {
+                cursor: pointer;
+                color: blue;
+                text-decoration: underline;
+            }
+            .command {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 4px 0;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="whisper-popup" class="whisper-popup">
+            <input type="text" id="whisper-input" placeholder="Type your private message...">
+            <button onclick="sendWhisper()">Send Whisper</button>
+            <button onclick="closeWhisperPopup()">✕</button>
+        </div>
+        <div id="wrapper">
+            <div id="loginform">
+                <p>please enter your name to continue!</p>
+                <form id="nameForm">
+                    <label for="name">name &mdash;</label>
+                    <input type="text" name="name" id="name" />
+                    <input type="submit" id="enter" value="enter" />
+                </form>
+            </div>
+            <div id="chatroom" style="display: none;">
+                <div id="customize-sidebar">
+                    <h3>Customize Chat</h3>
+                    <div class="customize-section">
+                        <label>Background Color</label>
+                        <input type="color" id="bgColorPicker" value="#eeeeee">
+                    </div>
+                    <div class="customize-section">
+                        <label>Text Color</label>
+                        <input type="color" id="textColorPicker" value="#000000">
+                    </div>
+                    <div class="customize-section">
+                        <label>Message Bubble Color</label>
+                        <input type="color" id="bubbleColorPicker" value="#546e7a">
+                    </div>
+                    <div class="customize-section">
+                        <label>Background Image</label>
+                        <input type="file" id="bgImageUpload" accept="image/*">
+                        <button id="clearBgImage">clear image</button>
+                    </div>
+                </div>
+                <div id="menu">
+                    <p class="welcome">welcome, <b id="username"></b></p>
+                    <p class="logout"><a id="exit" href="#">exit chatroom</a></p>
+                    <div class="search-container">
+                        <input type="text" id="searchInput" placeholder="Search messages...">
+                        <div id="searchResults" class="search-results"></div>
+                    </div>
+                </div>
+                <div class="emoji-bar">
+                <input type="file" id="emojiUpload" accept="image/*" style="display: none;">
+                <button onclick="document.getElementById('emojiUpload').click()">Add Emoji</button>
+                <div id="userEmojis"></div>
+            </div>
+            <div id="chatbox"></div>
+            <div id="typing-indicator" class="typing"></div>
+            <div id="reactionPopup" class="reaction-popup"></div>
+            <div id="online-users-sidebar">
+                <h3>Online Users</h3>
+                <div id="online-users-list"></div>
+            </div>
+            <form id="messageForm">
+                    <div style="position: relative; flex: 1;">
+                        <div id="commandHelper" class="command-helper">
+                            <div class="command">
+                                <span class="command-syntax">/w username message</span>
+                                <span class="command-icon">🔒</span>
+                                <span class="command-description">Send a private message to another user</span>
+                            </div>
+                        </div>
+                        <input name="usermsg" type="text" id="usermsg" />
+                    </div>
+                    <input name="submitmsg" type="submit" id="submitmsg" value="send" />
+                    <input type="file" id="fileInput" accept="image/*" style="display: none;" />
+                    <button type="button" id="uploadBtn">upload</button>
+                </form>
+            </div>
+        </div>
+        <script>
+            let messages = [];
+            let userStatuses = JSON.parse(localStorage.getItem('userStatuses') || '{}');
+            let userEmojis = JSON.parse(localStorage.getItem('userEmojis') || '[]');
+            let messageReactions = JSON.parse(localStorage.getItem('messageReactions') || '{}');
+            const username = localStorage.getItem('username');
+            let typing = false;
+            let timeout = undefined;
+            let targetUser = null;
+
+            if (username) {
+                showChat(username);
+            }
+
+            document.getElementById('nameForm').onsubmit = (e) => {
+                e.preventDefault();
+                const name = document.getElementById('name').value.trim();
+                if (name) {
+                    localStorage.setItem('username', name);
+                    showChat(name);
+                }
+            };
+
+            const usermsg = document.getElementById('usermsg');
+            const commandHelper = document.getElementById('commandHelper');
+
+            usermsg.addEventListener('input', (e) => {
+                const value = e.target.value;
+                if (value.startsWith('/')) {
+                    commandHelper.style.display = 'block';
+                } else {
+                    commandHelper.style.display = 'none';
+                }
+            });
+
+            usermsg.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    commandHelper.style.display = 'none';
+                }
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('#messageForm')) {
+                    commandHelper.style.display = 'none';
+                }
+            });
+
+            document.getElementById('messageForm').onsubmit = (e) => {
+                e.preventDefault();
+                const msg = document.getElementById('usermsg').value.trim();
+                if (msg) {
+                    if (msg.startsWith('/w ')) {
+                        const parts = msg.substring(3).split(' ');
+                        const whisperTo = parts.shift();
+                        const whisperMessage = parts.join(' ');
+                        sendWhisperCommand(whisperTo, whisperMessage);
+                    } else {
+                        addMessage(localStorage.getItem('username'), msg);
+                    }
+                    document.getElementById('usermsg').value = '';
+                    commandHelper.style.display = 'none';
+                    userStoppedTyping(); // Remove typing indicator after sending message
+                }
+            };
+
+            document.getElementById('exit').onclick = () => {
+                if (confirm('are you sure you want to end the session?')) {
+                    localStorage.removeItem('username');
+                    document.getElementById('chatroom').style.display = 'none';
+                    document.getElementById('loginform').style.display = 'block';
+                }
+            };
+
+            function deleteMessage(timestamp) {
+                const currentUser = localStorage.getItem('username');
+                messages = messages.filter(msg => !(msg.timestamp === timestamp && msg.name === currentUser));
+                fetch('/messages.json', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ messages })
+                }).then(() => displayMessages());
+            }
+
+            function showChat(name) {
+                document.getElementById('username').textContent = name;
+                document.getElementById('loginform').style.display = 'none';
+                document.getElementById('chatroom').style.display = 'block';
+                document.getElementById('customize-sidebar').style.display = 'block';
+                loadMessages();
+                updateOnlineUsers();
+
+                // Start online users refresh interval
+                setInterval(updateOnlineUsers, 5000);
+
+                // Event listener for typing indication
+                const usermsg = document.getElementById('usermsg');
+                usermsg.addEventListener('keyup', () => {
+                    if (usermsg.value.length  > 0) {
+                        userIsTyping(name);
+                    } else {
+                        userStoppedTyping();
+                    }
+                });
+            }
+
+            async function addMessage(name, text, isImage = false) {
+                const now = new Date();
+                const time = now.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                const date = now.toLocaleDateString('en-US');
+
+                const message = {
+                    name,
+                    text,
+                    time,
+                    date,
+                    timestamp: now.getTime(),
+                    isImage
+                };
+
+                messages.push(message);
+                await fetch('/messages.json', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ messages })
+                });
+                displayMessages();
+            }
+
+            async function loadMessages() {
+                try {
+                    const response = await fetch('/messages.json');
+                    const data = await response.json();
+                    messages = data.messages || [];
+                } catch (e) {
+                    messages = [];
+                }
+                displayMessages();
+            }
+
+            // Initialize emoji bar
+
+            async function updateEmojiBar() {
+                const response = await fetch('/emojis');
+                const data = await response.json();
+                const emojiBar = document.getElementById('userEmojis');
+                emojiBar.innerHTML = data.emojis.map(emoji => 
+                    `<img src="${emoji}" onclick="addToMessage('${emoji}')" alt="emoji" style="cursor: pointer;">`
+                ).join('');
+            }
+
+            // Refresh emoji bar periodically
+            setInterval(updateEmojiBar, 5000);
+
+            function addToMessage(emoji) {
+                const msgInput = document.getElementById('usermsg');
+                msgInput.value += ` <img src="${emoji}" style="width: 20px; height: 20px;"> `;
+                msgInput.focus();
+            }
+
+            document.getElementById('emojiUpload').addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const img = new Image();
+                        img.src = e.target.result;
+                        await img.decode();
+
+                        // Resize if needed
+                        let emojiData;
+                        if (img.width > 32 || img.height > 32) {
+                            const canvas = document.createElement('canvas');
+                            const ctx = canvas.getContext('2d');
+                            canvas.width = 32;
+                            canvas.height = 32;
+                            ctx.drawImage(img, 0, 0, 32, 32);
+                            emojiData = canvas.toDataURL();
+                        } else {
+                            emojiData = e.target.result;
+                        }
+
+                        fetch('/emojis', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ emoji: emojiData })
+                        }).then(() => updateEmojiBar());
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+
+            function showReactionPopup(event, msgTimestamp) {
+                const popup = document.getElementById('reactionPopup');
+                popup.innerHTML = userEmojis.map(emoji => 
+                    `<img src="${emoji}" onclick="addReactionToMessage('${msgTimestamp}', '${emoji}')" alt="emoji" style="width: 24px; height: 24px; margin: 2px; cursor: pointer;">`
+                ).join('');
+                popup.style.display = 'block';
+                popup.style.left = `${event.pageX}px`;
+                popup.style.top = `${event.pageY}px`;
+                event.stopPropagation();
+            }
+
+            document.addEventListener('click', () => {
+                document.getElementById('reactionPopup').style.display = 'none';
+            });
+
+            function addReactionToMessage(timestamp, emojiUrl) {
+                const username = localStorage.getItem('username');
+                fetch('/reactions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ messageId: timestamp, emoji: emojiUrl, username })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(() => {
+                    document.getElementById('reactionPopup').style.display = 'none';
+                    loadReactions();
+                })
+                .catch(error => {
+                    console.error('Error adding reaction:', error);
+                });
+            }
+
+            async function loadReactions() {
+                try {
+                    const response = await fetch('/reactions');
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    const data = await response.json();
+                    messageReactions = data.reactions || {};
+                    displayMessages();
+                } catch (error) {
+                    console.error('Error loading reactions:', error);
+                }
+            }
+
+            function displayMessages(highlightTerm = '') {
+                const chatbox = document.getElementById('chatbox');
+                const currentUser = localStorage.getItem('username');
+
+                // Fetch whispers
+                fetch(`/whispers?username=${currentUser}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        const whispers = data.whispers || {};
+
+                        chatbox.innerHTML = messages.map(msg => {
+                            const isWhisper = whispers[msg.timestamp];
+                            if (isWhisper) {
+                                if (isWhisper.from !== currentUser && isWhisper.to !== currentUser) {
+                                    return '';
+                                }
+                                const whisperIndicator = isWhisper.from === currentUser ? 
+                                    `Whisper to ${isWhisper.to}` : 
+                                    `Whisper from ${isWhisper.from}`;
+                                return `
+                                    <div class='msgln whisper-message' id="msg-${msg.timestamp}">
+                                        <div class='whisper-indicator'>🔒 ${whisperIndicator}</div>
+                                        <b class='user-name'>${msg.name}</b> ${msg.text}
+                                    </div>
+                                `;
+                            }
+                    let messageText = msg.text;
+                    if (highlightTerm && !msg.isImage) {
+                        const regex = new RegExp(`(${highlightTerm})`, 'gi');
+                        messageText = messageText.replace(regex, '<span class="highlight">$1</span>');
+                    }
+                    let content = msg.isImage 
+                        ? `<img src="${msg.text}" style="max-width: 300px; max-height: 300px; display: block; margin: 5px 0;">` 
+                        : msg.text.replace(/<img[^>]*>/g, (match) => match);
+                    const messageId = `msg-${msg.timestamp}`;
+                    const deleteButton = msg.name === localStorage.getItem('username') 
+                        ? `<span class="delete-msg" onclick="deleteMessage(${msg.timestamp})">🗑️</span>` 
+                        : '';
+
+                    const reactions = messageReactions[msg.timestamp] || {};
+                    const reactionHtml = Object.entries(reactions || {})
+                        .map(([emoji, users]) => {
+                            const count = Array.isArray(users) ? users.length : users.size;
+                            return `<span class="reaction" onclick="addReactionToMessage(${msg.timestamp}, '${emoji}')">
+                                <img src="${emoji}" alt="emoji">${count}
+                            </span>`;
+                        })
+                        .join('');
+
+                    return `
+                        <div class='msgln' id='${messageId}'>
+                            <b class='user-name'>${msg.name} <span class='chat-time'>${msg.time}</span> <span class='chat-date'>${msg.date}</span></b> 
+                            ${deleteButton}${content}<br>
+                            <div class="message-reactions">
+                                ${reactionHtml}
+                                <button onclick="showReactionPopup(event, ${msg.timestamp})">+</button>
+                            </div>
+                        </div>`;
+                }).join('');
+                chatbox.scrollTop = chatbox.scrollHeight;
+            });
+        }
+
+            // Status message handling
+            function updateUserStatus(status) {
+                const username = localStorage.getItem('username');
+                userStatuses[username] = status;
+                localStorage.setItem('userStatuses', JSON.stringify(userStatuses));
+                updateOnlineUsers();
+            }
+
+            // Update the online users display function
+            function updateOnlineUsers() {
+                const now = Date.now();
+                const chatUsers = JSON.parse(localStorage.getItem('chatUsers') || '{}');
+                const currentUser = localStorage.getItem('username');
+
+                if (currentUser) {
+                    chatUsers[currentUser] = now;
+                    localStorage.setItem('chatUsers', JSON.stringify(chatUsers));
+                }
+
+                const activeUsers = Object.entries(chatUsers)
+                    .filter(([_, timestamp]) => now - timestamp < 30000)
+                    .map(([username]) => username);
+
+                const usersList = document.getElementById('online-users-list');
+                usersList.innerHTML = activeUsers
+                    .map(user => {
+                        const status = userStatuses[user] || '';
+                        const isCurrentUser = user === currentUser;
+                        const statusHtml = isCurrentUser 
+                            ? `<div class="status-edit" onclick="editStatus()">${status || 'Set status...'}</div>`
+                            : status ? `<div class="status">${status}</div>` : '';
+
+                        return `<div class="online-user" onclick="${isCurrentUser ? '' : `handleUsernameClick('${user}', event)`}">
+                            <span class="username-link">${user}</span>
+                            ${statusHtml}
+                        </div>`;
+                    })
+                    .join('');
+            }
+
+            function editStatus() {
+                const newStatus = prompt('Enter your status:', userStatuses[localStorage.getItem('username')] || '');
+                if (newStatus !== null) {
+                    updateUserStatus(newStatus);
+                }
+            }
+
+            // Initialize emoji bar
+            updateEmojiBar();
+
+            // Handle file upload
+            document.getElementById('uploadBtn').onclick = () => {
+                document.getElementById('fileInput').click();
+            };
+
+            document.getElementById('fileInput').onchange = (e) => {
+                const file = e.target.files[0];
+                const maxSize = 5 * 1024 * 1024; // 5MB limit
+
+                if (file && file.type.startsWith('image/')) {
+                    if (file.size > maxSize) {
+                        alert('Image too large. Please select an image under 5MB.');
+                        return;
+                    }
+
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        addMessage(localStorage.getItem('username'), e.target.result, true);
+                    };
+                    reader.onerror = () => {
+                        alert('Error uploading image. Please try again.');
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            // Typing indicator functions
+            let typingTimeout;
+
+            function userIsTyping(username) {
+                if (!typing) {
+                    typing = true;
+                    updateTypingStatus(username, true);
+                }
+
+                clearTimeout(typingTimeout);
+                typingTimeout = setTimeout(() => userStoppedTyping(username), 3000);
+            }
+
+            function userStoppedTyping() {
+                const username = localStorage.getItem('username');
+                typing = false;
+                clearTimeout(typingTimeout);
+                updateTypingStatus(username, false);
+            }
+
+            async function updateTypingStatus(username, isTyping) {
+                try {
+                    await fetch('/typing', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, isTyping })
+                    });
+                } catch (error) {
+                    console.error('Error updating typing status:', error);
+                }
+            }
+
+            function updateTypingUsers() {
+                fetch('/typing')
+                    .then(response => {
+                        if (!response.ok) throw new Error('Network response was not ok');
+                        return response.json();
+                    })
+                    .then(data => {
+                        const typingIndicator = document.getElementById('typing-indicator');
+                        const currentUser = localStorage.getItem('username');
+                        const typingUsers = data.typing || [];
+
+                    if (typingUsers.length > 0) {
+                        const message = typingUsers.length === 1 
+                            ? `${typingUsers[0]} is typing...`
+                            : `${typingUsers.join(', ')} are typing...`;
+                        typingIndicator.textContent = message;
+                        typingIndicator.style.display = 'block';
+                    } else {
+                        typingIndicator.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching typing status:', error);
+                    typingIndicator.style.display = 'none';
+                });
+            }
+
+            // Set up regular polling for typing status and reactions
+            setInterval(updateTypingUsers, 1000);
+            setInterval(loadReactions, 1000);
+
+            // Theme customization
+            function loadCustomTheme() {
+                const theme = JSON.parse(localStorage.getItem('chatTheme') || '{}');
+                if (theme.bgColor) {
+                    document.documentElement.style.setProperty('--bg-color', theme.bgColor);
+                    document.getElementById('bgColorPicker').value = theme.bgColor;
+                }
+                if (theme.textColor) {
+                    document.documentElement.style.setProperty('--text-color', theme.textColor);
+                    document.getElementById('textColorPicker').value = theme.textColor;
+                }
+                if (theme.bubbleColor) {
+                    document.documentElement.style.setProperty('--bubble-color', theme.bubbleColor);
+                    document.getElementById('bubbleColorPicker').value = theme.bubbleColor;
+                }
+                if (theme.bgImage) {
+                    document.body.style.backgroundImage = `url(${theme.bgImage})`;
+                    document.body.style.backgroundSize = 'cover';
+                    document.body.style.backgroundAttachment = 'fixed';
+                }
+            }
+
+            function saveTheme(updates) {
+                const currentTheme = JSON.parse(localStorage.getItem('chatTheme') || '{}');
+                const newTheme = { ...currentTheme, ...updates };
+                localStorage.setItem('chatTheme', JSON.stringify(newTheme));
+            }
+
+            document.getElementById('bgColorPicker').addEventListener('input', (e) => {
+                document.documentElement.style.setProperty('--bg-color', e.target.value);
+                saveTheme({ bgColor: e.target.value });
+            });
+
+            document.getElementById('textColorPicker').addEventListener('input', (e) => {
+                document.documentElement.style.setProperty('--text-color', e.target.value);
+                saveTheme({ textColor: e.target.value });
+            });
+
+            document.getElementById('bubbleColorPicker').addEventListener('input', (e) => {
+                document.documentElement.style.setProperty('--bubble-color', e.target.value);
+                saveTheme({ bubbleColor: e.target.value });
+            });
+
+            document.getElementById('bgImageUpload').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const imageData = e.target.result;
+                        document.body.style.backgroundImage = `url(${imageData})`;
+                        document.body.style.backgroundSize = 'cover';
+                        document.body.style.backgroundAttachment = 'fixed';
+                        saveTheme({ bgImage: imageData });
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+
+            document.getElementById('clearBgImage').addEventListener('click', () => {
+                document.body.style.backgroundImage = 'none';
+                saveTheme({ bgImage: null });
+            });
+
+            // Search functionality
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                const searchTerm = e.target.value.toLowerCase();
+                const searchResults = document.getElementById('searchResults');
+
+                if (!searchTerm) {
+                    searchResults.style.display = 'none';
+                    displayMessages(); // Reset highlighting
+                    return;
+                }
+
+                const matches = messages.filter(msg => 
+                    msg.text.toLowerCase().includes(searchTerm) ||
+                    msg.name.toLowerCase().includes(searchTerm) ||
+                    msg.date.toLowerCase().includes(searchTerm) ||
+                    msg.time.toLowerCase().includes(searchTerm)
+                );
+
+                if (matches.length > 0) {
+                    searchResults.style.display = 'block';
+                    searchResults.innerHTML = matches.map(msg => `
+                        <div class="search-result" onclick="highlightMessage('${msg.timestamp}')">
+                            ${msg.name} (${msg.date} ${msg.time}): ${msg.text}
+                        </div>
+                    `).join('');
+                } else {
+                    searchResults.style.display = 'block';
+                    searchResults.innerHTML = '<div class="search-result">No matches found</div>';
+                }
+            });
+
+            function highlightMessage(timestamp) {
+                const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+                displayMessages(searchTerm);
+                document.getElementById('searchResults').style.display = 'none';
+
+                const messageElement = document.getElementById(`msg-${timestamp}`);
+                if (messageElement) {
+                    messageElement.scrollIntoView({ behavior: 'smooth' });
+                }
+            }
+
+            // Whisper functionality
+            function handleUsernameClick(username, event) {
+                targetUser = username;
+                const popup = document.getElementById('whisper-popup');
+                popup.style.display = 'block';
+                popup.style.left = `${event.pageX}px`;
+                popup.style.top = `${event.pageY}px`;
+            }
+
+            function sendWhisper() {
+                const whisperMessage = document.getElementById('whisper-input').value.trim();
+                if (whisperMessage && targetUser) {
+                    sendWhisperToServer(targetUser, whisperMessage);
+                    document.getElementById('whisper-input').value = '';
+                    closeWhisperPopup();
+                }
+            }
+
+            function sendWhisperCommand(whisperTo, whisperMessage) {
+                if (whisperMessage && whisperTo) {
+                    sendWhisperToServer(whisperTo, whisperMessage);
+                }
+            }
+
+
+            function sendWhisperToServer(whisperTo, whisperMessage) {
+                const now = new Date();
+                const time = now.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                const date = now.toLocaleDateString('en-US');
+                const timestamp = now.getTime();
+                const sender = localStorage.getItem('username');
+
+                const whisper = {
+                    from: sender,
+                    to: whisperTo,
+                    message: whisperMessage,
+                    timestamp: timestamp
+                };
+
+                fetch('/whisper', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(whisper)
+                })
+                .then(response => {
+                    if (!response.ok) throw new Error('Whisper failed');
+                    return response.json();
+                })
+                .then(() => {
+                    const message = {
+                        name: sender,
+                        text: whisperMessage,
+                        time: time,
+                        date: date,
+                        timestamp: timestamp,
+                        isImage: false
+                    };
+                    messages.push(message);
+                    displayMessages();
+                })
+                .catch(error => console.error('Error sending whisper:', error));
+            }
+
+
+            function closeWhisperPopup() {
+                document.getElementById('whisper-popup').style.display = 'none';
+                targetUser = null;
+            }
+
+            // Load saved theme on startup
+            loadCustomTheme();
+
+            document.querySelector('.command').addEventListener('click', function() {
+                const msgInput = document.getElementById('usermsg');
+                msgInput.value = '/w ';
+                msgInput.focus();
+            });
+        </script>
+    </body>
+</html>
